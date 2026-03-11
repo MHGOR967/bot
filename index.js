@@ -1,6 +1,5 @@
 /**
- * بوت وهم المطور (wa7m.com)
- * نسخة التشغيل المستقرة مع قائمة أوامر ذكية
+ * بوت وهم المطور (wa7m.com) - نسخة إصلاح التحميل
  * المطور: Wahm (@ymn_x17)
  */
 
@@ -12,32 +11,29 @@ const fs = require('fs');
 const express = require('express');
 
 const app = express();
+const port = process.env.PORT || 3000;
 const GROQ_API_KEY = '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';
 
-// قائمة الأوامر بشكل احترافي
+// قائمة الأوامر
 const helpMenu = `
 🛡️ *مرحباً بك في عالم وهم* 🛡️
 _بوت موقع wa7m.com المطور_
 
 إليك قائمة الأوامر الذكية:
-
-1️⃣  *.شغل* [اسم المقطع] : تحميل صوت من يوتيوب.
-2️⃣  *.ذكاء* [سؤالك] : التحدث مع أحدث موديلات AI.
-3️⃣  *.موقع* : رابط موقعنا الرسمي.
-4️⃣  *.وقت* : الوقت والتاريخ الحالي بالسعودية.
-5️⃣  *.نكتة* : فرفش مع نكت وهم.
-6️⃣  *.دعاء* : رسالة إيمانية لك.
-7️⃣  *.ترجمة* [نص] : للترجمة الفورية.
-8️⃣  *.مطور* : تواصل مع مطور البوت.
-9️⃣  *.حالة* : فحص حالة السيرفر.
-🔟 *.اوامر* : لعرض هذه القائمة مرة أخرى.
-
-💡 *تلميح:* تقدر تسولف معي بأي وقت وبرد عليك باللهجة السعودية!
+1️⃣ .شغل [اسم المقطع] : تحميل صوتي.
+2️⃣ .ذكاء [سؤالك] : تحدث مع الذكاء الاصطناعي.
+3️⃣ .موقع : رابطنا الرسمي.
+4️⃣ .وقت : توقيت مكة المكرمة.
+5️⃣ .نكتة : فرفش مع وهم.
+6️⃣ .دعاء : رسالة إيمانية.
+7️⃣ .ترجمة [نص] : ترجمة فورية.
+8️⃣ .مطور : تواصل مع وهم.
+9️⃣ .حالة : فحص السيرفر.
+🔟 .اوامر : عرض القائمة.
 `;
 
-async function startWahmPro() {
-    // إعداد الجلسة من الملف المرفوع مباشرة (creds.json)
-    const { state, saveCreds } = await useMultiFileAuthState('./'); 
+async function startWahmBot() {
+    const { state, saveCreds } = await useMultiFileAuthState('./');
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
@@ -45,7 +41,7 @@ async function startWahmPro() {
         logger: pino({ level: 'silent' }),
         auth: state,
         browser: Browsers.macOS('Desktop'),
-        printQRInTerminal: true
+        printQRInTerminal: false
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -53,11 +49,12 @@ async function startWahmPro() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== disconnectReason.loggedOut;
-            console.log('🔄 جاري محاولة إعادة الاتصال...');
-            if (shouldReconnect) startWahmPro();
+            const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
+            if (reason !== disconnectReason.loggedOut) {
+                setTimeout(startWahmBot, 5000);
+            }
         } else if (connection === 'open') {
-            console.log('🛡️ Wahm Pro Bot is Online & Ready!');
+            console.log('🛡️ Wahm Pro Bot is Online!');
         }
     });
 
@@ -66,73 +63,80 @@ async function startWahmPro() {
         if (!m.message || m.key.fromMe) return;
 
         const from = m.key.remoteJid;
-        const senderName = m.pushName || "صديق وهم";
         const body = m.message.conversation || m.message.extendedTextMessage?.text || "";
-        
-        // عرض القائمة عند أول تواصل
-        if (body.toLowerCase() === 'اوامر' || body === '.' || body === 'هلا') {
-            await sock.sendMessage(from, { text: `هلا بك يا ${senderName} في بوت wa7m.com\n${helpMenu}` });
-            return;
-        }
+        const senderName = m.pushName || "صديق وهم";
 
-        // الأوامر المباشرة
         if (body.startsWith('.')) {
             const args = body.slice(1).trim().split(/ +/);
             const command = args.shift().toLowerCase();
-            const fullArgs = args.join(' ');
+            const text = args.join(' ');
 
-            switch(command) {
-                case 'شغل':
-                    if (!fullArgs) return sock.sendMessage(from, { text: "ارسل اسم المقطع بعد .شغل" });
-                    await sock.sendMessage(from, { text: "⏳ جاري جلب الصوت..." });
-                    try {
-                        const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(fullArgs)}`;
-                        const { data: html } = await axios.get(searchUrl);
-                        const videoId = html.match(/"videoId":"([^"]+)"/)[1];
-                        const apiRes = await axios.get(`https://api.phimtat.vn/snapvideo/json.php?url=https://www.youtube.com/watch?v=${videoId}`);
-                        const downloadUrl = apiRes.data.url || apiRes.data.links[0].url;
-                        await sock.sendMessage(from, { audio: { url: downloadUrl }, mimetype: 'audio/mp4' });
-                    } catch (e) { await sock.sendMessage(from, { text: "❌ فشل التحميل." }); }
-                    break;
+            if (command === 'اوامر') {
+                await sock.sendMessage(from, { text: `هلا بك يا ${senderName} في بوت wa7m.com\n${helpMenu}` });
+            } else if (command === 'شغل') {
+                if (!text) return sock.sendMessage(from, { text: "⚠️ يرجى كتابة اسم المقطع بعد الأمر .شغل" });
+                await sock.sendMessage(from, { text: "⏳ جاري البحث والتحميل لموقع wa7m.com..." });
 
-                case 'موقع':
-                    await sock.sendMessage(from, { text: "🌐 موقعنا الرسمي: https://wa7m.com" });
-                    break;
+                try {
+                    // استخدام محرك بحث وتحميل جديد (API البديل)
+                    const searchRes = await axios.get(`https://api.popcat.xyz/github/search?q=${encodeURIComponent(text)}`); // هذا مثال لمصدر بحث، سنستخدم يوتيوب المباشر
+                    const youtubeSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(text)}`;
+                    const { data: html } = await axios.get(youtubeSearchUrl);
+                    const videoIdMatch = html.match(/"videoId":"([^"]+)"/);
+                    
+                    if (!videoIdMatch) throw new Error("Video not found");
+                    const videoId = videoIdMatch[1];
+                    
+                    // API تحميل بديل ومستقر
+                    const downloadApiUrl = `https://api.vevioz.com/api/button/mp3/${videoId}`;
+                    
+                    await sock.sendMessage(from, { 
+                        audio: { url: downloadApiUrl }, 
+                        mimetype: 'audio/mp4',
+                        fileName: `${text}.mp3`
+                    });
 
-                case 'مطور':
-                    await sock.sendMessage(from, { text: "🛡️ المطور: وهم\nسناب: ymn_x17" });
-                    break;
-
-                case 'نكتة':
-                    const jokes = ["محشش ضيع أهله، راح للشرطة قالهم: ما شفتوا واحد يمشي وأنا مو معه؟", "واحد سأل محشش: ليش لابس جزمتين وحدة سوداء ووحدة بنية؟ قال: والله عندي وحدة ثانية زيها بالبيت!"];
-                    await sock.sendMessage(from, { text: jokes[Math.floor(Math.random() * jokes.length)] });
-                    break;
-                
-                case 'حالة':
-                    await sock.sendMessage(from, { text: "✅ السيرفر يعمل بكفاءة عالية لموقع wa7m.com" });
-                    break;
-
-                default:
-                    await sock.sendMessage(from, { text: "⚠️ أمر غير موجود، أرسل كلمة (اوامر)." });
+                } catch (e) {
+                    console.error(e);
+                    await sock.sendMessage(from, { text: "❌ معذرةً، حدث خطأ أثناء التحميل. جرب كتابة اسم المقطع بشكل أوضح." });
+                }
+            } else if (command === 'موقع') {
+                await sock.sendMessage(from, { text: "🌐 موقعنا الرسمي: https://wa7m.com" });
+            } else if (command === 'وقت') {
+                await sock.sendMessage(from, { text: `⏰ التوقيت الحالي (مكة): ${new Date().toLocaleTimeString('ar-SA')}` });
+            } else if (command === 'نكتة') {
+                const jokes = ["محشش يسأل خويه: ليش القطار مهم؟ قال: لأن تحته خطين!", "واحد بخيل احترق بيته، اتصل بالمطافئ رنة وفصل."];
+                await sock.sendMessage(from, { text: jokes[Math.floor(Math.random() * jokes.length)] });
+            } else if (command === 'مطور') {
+                await sock.sendMessage(from, { text: "🛡️ المطور: وهم (Wahm)\nسناب: ymn_x17\nالموقع: wa7m.com" });
+            } else if (command === 'حالة') {
+                await sock.sendMessage(from, { text: "✅ السيرفر متصل ويعمل بكفاءة." });
             }
-            return;
+        } else {
+            // رد الذكاء الاصطناعي الافتراضي
+            try {
+                const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+                    model: "llama-3.3-70b-versatile",
+                    messages: [
+                        { role: "system", content: "أنت وهم، مطور موقع wa7m.com. رد بلهجة سعودية." },
+                        { role: "user", content: body }
+                    ]
+                }, { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` } });
+                await sock.sendMessage(from, { text: res.data.choices[0].message.content });
+            } catch (e) {}
         }
-
-        // الرد بالذكاء الاصطناعي على أي رسالة أخرى
-        try {
-            const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-                model: "llama-3.3-70b-versatile",
-                messages: [
-                    { role: "system", content: "أنت وهم، مطور موقع wa7m.com. رد بلهجة سعودية خفيفة وذكية." },
-                    { role: "user", content: body }
-                ]
-            }, { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` } });
-            await sock.sendMessage(from, { text: res.data.choices[0].message.content });
-        } catch (e) {}
     });
 }
 
-startWahmPro();
-app.get('/', (req, res) => res.send('🛡️ Wahm Bot Active'));
-app.listen(process.env.PORT || 3000);
+// البقاء حياً
+app.get('/', (req, res) => res.send('🛡️ Wahm Bot is Live!'));
+app.listen(port, () => {
+    console.log(`Server started on port ${port}`);
+    startWahmBot();
+    
+    // Self-ping للبقاء حياً
+    setInterval(() => {
+        axios.get(`https://bot-1q3m.onrender.com`).catch(() => {});
+    }, 5 * 60 * 1000);
+});
 
