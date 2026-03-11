@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 const GROQ_API_KEY = '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';
 
 // --- ضع رقم جوالك هنا مع مفتاح الدولة (مثلاً 966500000000) ---
-const PHONE_NUMBER = '966XXXXXXXXX'; 
+const PHONE_NUMBER = '966590906818'; 
 
 async function startWahmBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
