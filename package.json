@@ -1,17 +1,18 @@
 {
-  "name": "wahm-bot-free",
+  "name": "wahm-bot-pairing",
   "version": "1.0.0",
+  "description": "WhatsApp Bot for wa7m.com with Pairing Code",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.6.0",
+    "@whiskeysockets/baileys": "^6.7.9",
     "@hapi/boom": "^10.0.1",
     "axios": "^1.6.0",
     "express": "^4.18.2",
-    "pino": "^8.16.1",
-    "qrcode-terminal": "^0.12.0"
+    "pino": "^8.19.0",
+    "pino-pretty": "^10.3.1"
   }
 }
 
