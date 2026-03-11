@@ -1,6 +1,7 @@
 {
-  "name": "wahm-bot-final",
+  "name": "wahm-bot-v2",
   "version": "1.0.0",
+  "description": "WhatsApp Bot for wa7m.com",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
