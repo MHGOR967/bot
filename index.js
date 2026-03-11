@@ -1,6 +1,6 @@
 /**
  * 🤖 مساعد محمد الذكي (wa7m.com)
- * نسخة "تجديد الجلسة" للاستقرار الكامل على Render
+ * نسخة تصحيح الأخطاء وربط الجلسة الجديدة
  * المطور: محمد (Wahm)
  */
 
@@ -22,10 +22,10 @@ const port = process.env.PORT || 3000;
 const GROQ_API_KEY = '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';
 
 async function startWahmBot() {
-    console.log("🚀 بدء تشغيل نظام مساعد محمد... جاري تجهيز الجلسة.");
+    console.log("🛠️ جاري محاولة بدء التشغيل وتوليد الباركود...");
     
-    // المجلد الجديد للجلسة (يُفضل مسح القديم أولاً من GitHub)
-    const { state, saveCreds } = await useMultiFileAuthState('./session_new_wahm');
+    // استخدم اسم مجلد جديد تماماً للتأكد من نظافة الجلسة
+    const { state, saveCreds } = await useMultiFileAuthState('./session_final_wahm');
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
@@ -33,7 +33,7 @@ async function startWahmBot() {
         logger: pino({ level: 'silent' }),
         auth: state,
         browser: Browsers.macOS('Desktop'),
-        printQRInTerminal: true, // سيظهر الباركود في سجلات ريندر (Logs)
+        printQRInTerminal: true, // مهم جداً لرؤيته في Logs
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 15000
     });
@@ -43,21 +43,21 @@ async function startWahmBot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        // عرض الباركود في السجل إذا ظهر
         if (qr) {
-            console.log("📢 يرجى مسح الباركود أدناه لربط مساعد محمد:");
+            console.log("📸 امسح الباركود الجديد الآن من سجلات Render:");
             qrcode.generate(qr, { small: true });
         }
 
         if (connection === 'close') {
             const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
-            console.log(`📡 انقطع الاتصال. الكود: ${reason}`);
             if (reason !== disconnectReason.loggedOut) {
-                console.log("🔄 محاولة إعادة اتصال تلقائية...");
+                console.log("🔄 انقطع الاتصال، جاري المحاولة مرة أخرى...");
                 setTimeout(startWahmBot, 5000);
+            } else {
+                console.log("❌ تم تسجيل الخروج. يرجى مسح الباركود مجدداً.");
             }
         } else if (connection === 'open') {
-            console.log('✅ تم الربط بنجاح! مساعد محمد متاح الآن لخدمة زوار wa7m.com');
+            console.log('✅ تم الربط! مساعد محمد (wa7m.com) متصل الآن.');
         }
     });
 
@@ -70,36 +70,29 @@ async function startWahmBot() {
             const senderName = m.pushName || "ضيفنا العزيز";
             const body = m.message.conversation || m.message.extendedTextMessage?.text || "";
 
-            // 1. معالجة الأوامر (بالنقطة كما طلبت)
             if (body.startsWith('.')) {
                 const args = body.slice(1).trim().split(/ +/);
                 const command = args.shift().toLowerCase();
                 const text = args.join(' ');
 
                 if (command === 'اوامر') {
-                    const menu = `✨ *أهلاً بك يا ${senderName}* ✨\nأنا *مساعد محمد* الذكي. 🛡️\n\n📌 *الأوامر المتاحة:* \n━━━━━━━━━━━━━━\n🎵 *.شغل* [اسم المقطع]\n🤖 *.ذكاء* [سؤالك]\n🕌 *.آية* | *.دعاء*\n📱 *.مطور*\n🌍 *.موقع*\n━━━━━━━━━━━━━━\n_نسعد بخدمتك دائماً.._ 😊`;
+                    const menu = `✨ *أهلاً يا ${senderName}* ✨\nأنا مساعد محمد الذكي. 🛡️\n\n📌 *الأوامر:* \n.شغل | .ذكاء | .مطور | .موقع | .آية\n\n_نسعد بخدمتك في wa7m.com_ 😊`;
                     await sock.sendMessage(from, { text: menu });
                 } else if (command === 'شغل') {
-                    if (!text) return sock.sendMessage(from, { text: "اكتب اسم المقطع بعد ( .شغل ) 🎵" });
-                    await sock.sendMessage(from, { text: "⏳ جاري التحميل من wa7m.com..." });
+                    if (!text) return sock.sendMessage(from, { text: "اكتب اسم المقطع بعد ( .شغل )" });
+                    await sock.sendMessage(from, { text: "⏳ جاري جلب الصوت..." });
                     try {
                         const s = await axios.get(`https://api.vreden.my.id/api/ytsearch?query=${encodeURIComponent(text)}`);
                         const v = s.data.result[0];
                         const d = await axios.get(`https://api.vreden.my.id/api/ytmp3?url=${encodeURIComponent(v.url)}`);
                         await sock.sendMessage(from, { audio: { url: d.data.result.download.url }, mimetype: 'audio/mp4' });
-                    } catch (e) { await sock.sendMessage(from, { text: "عذراً، المحرك مشغول حالياً." }); }
-                } else if (command === 'مطور') {
-                    await sock.sendMessage(from, { text: `👤 المطور: محمد (Wahm)\n🌐 الموقع: wa7m.com\n📱 واتساب: https://wa.me/967730349682` });
+                    } catch (e) { await sock.sendMessage(from, { text: "المحرك مشغول، جرب لاحقاً." }); }
                 }
-            } 
-            // 2. الرد الترحيبي الأول (بدون تخزين)
-            else if (body.length > 0) {
-                const greetings = ['هلا', 'مرحبا', 'السلام', 'هاي', 'الو'];
+            } else if (body.length > 0) {
+                const greetings = ['هلا', 'مرحبا', 'السلام', 'هاي'];
                 if (greetings.some(g => body.toLowerCase().includes(g))) {
-                    const welcome = `يا هلا بك يا ${senderName}! أنا مساعد محمد الذكي. 🛡️\n\nللاطلاع على خدماتي، يرجى إرسال كلمة:\n*( .اوامر )*\n\n(تذكر النقطة في البداية) 😊`;
-                    await sock.sendMessage(from, { text: welcome });
+                    await sock.sendMessage(from, { text: `يا هلا بك يا ${senderName}! أنا مساعد محمد الذكي. 🛡️\nللاطلاع على خدماتي، أرسل:\n*( .اوامر )* 😊` });
                 } else {
-                    // السوالف تروح للذكاء
                     await handleAI(sock, from, body);
                 }
             }
@@ -112,22 +105,15 @@ async function handleAI(sock, from, prompt) {
         const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
             model: "llama-3.3-70b-versatile",
             messages: [
-                { role: "system", content: "أنت مساعد محمد، ذكاء اصطناعي محترم. المطور هو محمد صاحب موقع wa7m.com." },
+                { role: "system", content: "أنت مساعد محمد، ذكاء اصطناعي محترم. المطور هو محمد (Wahm) صاحب موقع wa7m.com." },
                 { role: "user", content: prompt }
             ]
         }, { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` }, timeout: 15000 });
-
-        const aiMsg = `⚠️ *تنبيه:* أنا مساعد محمد (ذكاء اصطناعي). سأخبر محمد برسالتك فور تواجدة. 😊\n\n━━━━━━━━━━━━━━\n${res.data.choices[0].message.content}`;
+        const aiMsg = `⚠️ *تنبيه:* أنا مساعد محمد الذكي. سأخبره برسالتك فوراً. 😊\n\n━━━━━━━━━━━━━━\n${res.data.choices[0].message.content}`;
         await sock.sendMessage(from, { text: aiMsg });
-    } catch (e) { console.log("AI Error"); }
+    } catch (e) { console.log("AI Offline"); }
 }
 
-app.get('/', (req, res) => {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(`<div style="text-align:center; padding:50px; font-family:sans-serif;"><h1>🛡️ نظام مساعد محمد يعمل</h1><p>تأكد من سجلات ريندر لمسح الباركود الجديد</p></div>`);
-});
-
-app.listen(port, () => {
-    startWahmBot();
-});
+app.get('/', (req, res) => res.send("Bot is Running - wa7m.com"));
+app.listen(port, () => startWahmBot());
 
